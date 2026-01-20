@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Config Merge Studio (Pro)</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <!-- Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <!-- Diff Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsdiff/5.1.0/diff.min.js"></script>
+
+    <style>
+        :root {
+            --bg-app: #1e1f22;
+            /* IDEA Dark */
+            --bg-panel: #2b2d30;
+            --bg-editor: #1e1f22;
+            --border: #393b40;
+            --line-num-bg: #2b2d30;
+            --line-num-text: #606366;
+            --text-main: #a9b7c6;
+            --text-cursor: #bbbbbb;
+
+            /* Diff Colors (IDEA style) */
+            --diff-add-bg: #294436;
+            /* Dark Green */
+            --diff-add-line: #375239;
+            --diff-del-bg: #482c2d;
+            /* Dark Red */
+            --diff-del-line: #573638;
+            --diff-mod-bg: #32424a;
+            /* Blue-ish */
+            --diff-mod-line: #38515c;
+
+            --gutter-width: 40px;
+            --action-gutter-width: 30px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-app);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Toolbar */
+        .toolbar {
+            height: 48px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            background: var(--bg-panel);
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+
+        .brand {
+            font-weight: 600;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #dfe1e5;
+        }
+
+        .btn {
+            background: #3574f0;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn:hover {
+            background: #3c7bf6;
+        }
+
+        .btn-secondary {
+            background: #4e5157;
+        }
+
+        .btn-secondary:hover {
+            background: #5a5d63;
+        }
+
+        /* Input Modal / Drawer */
+        #inputDrawer {
+            position: absolute;
+            top: 48px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg-app);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #inputDrawer.hidden {
+            display: none;
+        }
+
+        .drawer-content {
+            flex: 1;
+            display: flex;
+        }
+
+        .input-pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--border);
+        }
+
+        .input-pane:last-child {
+            border: none;
+        }
+
+        .pane-header {
+            padding: 8px 16px;
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border);
+            font-size: 12px;
+            font-weight: 600;
+            color: #868a91;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .raw-input {
+            flex: 1;
+            background: var(--bg-editor);
+            color: var(--text-main);
+            border: none;
+            padding: 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            resize: none;
+            outline: none;
+        }
+
+        /* Main Merge View */
+        #mergeContainer {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .merge-scroller {
+            flex: 1;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        .merge-grid {
+            display: grid;
+            /* Layout: LineNum | Content(Left) | ActionGutter | LineNum | Content(Center) | LineNum | ActionGutter | Content(Right) | LineNum */
+            /* Simplified: Left (33%) - Gutter - Center (34%) - Gutter - Right (33%) */
+            /* Actually, IDEA has: Left Panel | Center Panel | Right Panel */
+            grid-template-columns: 1fr 30px 1fr 30px 1fr;
+            width: 100%;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            line-height: 24px;
+            /* Fixed line height for alignment */
+        }
+
+        /* Column Styles */
+        .col-left,
+        .col-center,
+        .col-right {
+            background: var(--bg-editor);
+            border-right: 1px solid var(--border);
+            position: relative;
+        }
+
+        .col-right {
+            border-right: none;
+        }
+
+        .gutter {
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            user-select: none;
+            position: relative;
+        }
+
+        /* Line Styling */
+        .line {
+            height: 24px;
+            white-space: pre;
+            padding: 0 8px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+        }
+
+        .line.empty {
+            background: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIklEQVQIW2NkQAKrVq36zwjjgzhhYWGMYAEYB8RmROaABADeOQ8CXl/xfgAAAABJRU5ErkJggg==') repeat;
+            opacity: 0.1;
+        }
+
+        /* Diff Highlights */
+        .diff-add {
+            background-color: var(--diff-add-bg);
+        }
+
+        .diff-del {
+            background-color: var(--diff-del-bg);
+        }
+
+        .diff-mod {
+            background-color: var(--diff-mod-bg);
+        }
+
+        .diff-ignored {
+            background-color: #3b3c3d !important;
+            opacity: 0.6;
+        }
+
+        .nav-group {
+            display: flex;
+            background: #393b40;
+            border-radius: 4px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        .nav-btn {
+            background: transparent;
+            color: #dfe1e5;
+            border: none;
+            padding: 6px 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+        }
+
+        .nav-btn:hover {
+            background: #4e5157;
+        }
+
+        .nav-btn:disabled {
+            opacity: 0.3;
+            cursor: default;
+        }
+
+        .nav-btn+.nav-btn {
+            border-left: 1px solid var(--border);
+        }
+
+        /* Actions in Gutter */
+        .action-marker {
+            position: absolute;
+            left: 0;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.05);
+            cursor: pointer;
+            z-index: 10;
+        }
+
+        .action-marker:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .action-btn {
+            color: #868a91;
+            font-size: 14px;
+        }
+
+        .action-btn:hover {
+            color: white;
+        }
+
+        /* Result Code */
+        #finalOutput {
+            display: none;
+            /* We use the grid for display */
+        }
+
+        /* Connecting Lines (Canvas) */
+        #connectionCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 5;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+        <div class="brand">
+            <i class="ph ph-git-merge" style="font-size: 20px; color: #3574f0;"></i>
+            Smart Config Merger
+        </div>
+        <div style="display:flex; gap:10px; align-items: center;">
+            <div class="nav-group">
+                <button class="nav-btn" onclick="navigateDiff(-1)" title="Previous Difference">
+                    <i class="ph ph-caret-up"></i>
+                </button>
+                <button class="nav-btn" onclick="navigateDiff(1)" title="Next Difference">
+                    <i class="ph ph-caret-down"></i>
+                </button>
+            </div>
+            <button class="btn btn-secondary" id="undoBtn" onclick="undo()" disabled title="Undo last merge action">
+                <i class="ph ph-arrow-u-up-left"></i> Undo
+            </button>
+            <button class="btn btn-secondary" onclick="toggleInputs()">
+                <i class="ph ph-pencil-simple"></i> Edit Sources
+            </button>
+            <button class="btn" onclick="copyResult()">
+                <i class="ph ph-check"></i> Copy Result
+            </button>
+        </div>
+    </div>
+
+    <!-- Input View (Initially Visible if empty) -->
+    <div id="inputDrawer">
+        <div class="drawer-content">
+            <div class="input-pane">
+                <div class="pane-header">LEFT SOURCE</div>
+                <textarea id="leftInput" class="raw-input" placeholder="Paste original config here..."></textarea>
+            </div>
+            <div class="input-pane">
+                <div class="pane-header">RIGHT SOURCE</div>
+                <textarea id="rightInput" class="raw-input" placeholder="Paste modified config here..."></textarea>
+            </div>
+        </div>
+        <div style="padding: 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end;">
+            <button class="btn" onclick="toggleInputs()">Compare & Merge</button>
+        </div>
+    </div>
+
+    <!-- Merge View -->
+    <div id="mergeContainer">
+        <div class="pane-header" style="display: grid; grid-template-columns: 1fr 30px 1fr 30px 1fr;">
+            <span style="padding-left: 8px;">Left (Theirs)</span>
+            <span></span>
+            <span style="padding-left: 8px;">Result (Merged)</span>
+            <span></span>
+            <span style="padding-left: 8px;">Right (Yours)</span>
+        </div>
+        <div class="merge-scroller" id="scroller">
+            <div class="merge-grid" id="gridDisplay">
+                <!-- Content Injected via JS -->
+            </div>
+            <canvas id="connectionCanvas"></canvas>
+        </div>
+    </div>
+
+    <script>
+        const leftInput = document.getElementById('leftInput');
+        const rightInput = document.getElementById('rightInput');
+        const inputDrawer = document.getElementById('inputDrawer');
+        const gridDisplay = document.getElementById('gridDisplay');
+
+        // Internal State
+        let visualRows = [];
+        let history = [];
+
+        function pushHistory() {
+            history.push(JSON.stringify(visualRows));
+            if (history.length > 50) history.shift();
+            updateUndoButton();
+        }
+
+        function updateUndoButton() {
+            const btn = document.getElementById('undoBtn');
+            if (btn) btn.disabled = history.length === 0;
+        }
+
+        function undo() {
+            if (history.length === 0) return;
+            visualRows = JSON.parse(history.pop());
+            renderVisualRows(visualRows);
+            updateUndoButton();
+        }
+
+        function toggleInputs() {
+            if (inputDrawer.classList.contains('hidden')) {
+                inputDrawer.classList.remove('hidden');
+            } else {
+                inputDrawer.classList.add('hidden');
+                computeAndRender();
+            }
+        }
+
+        function computeAndRender() {
+            const leftText = leftInput.value || "";
+            const rightText = rightInput.value || "";
+
+            const diff = Diff.diffLines(leftText, rightText);
+
+            visualRows = [];
+            history = [];
+            updateUndoButton();
+
+            diff.forEach(part => {
+                const lines = part.value.replace(/\n$/, '').split('\n');
+
+                if (part.added) {
+                    lines.forEach(line => {
+                        visualRows.push({
+                            type: 'right-add',
+                            left: null,
+                            right: line,
+                            center: '',
+                            ignored: false
+                        });
+                    });
+                } else if (part.removed) {
+                    lines.forEach(line => {
+                        visualRows.push({
+                            type: 'left-only',
+                            left: line,
+                            right: null,
+                            center: line,
+                            ignored: false
+                        });
+                    });
+                } else {
+                    lines.forEach(line => {
+                        visualRows.push({
+                            type: 'common',
+                            left: line,
+                            right: line,
+                            center: line,
+                            ignored: false
+                        });
+                    });
+                }
+            });
+
+            renderVisualRows(visualRows);
+        }
+
+        let currentDiffIdx = -1;
+
+        function navigateDiff(dir) {
+            // Find all unique diff blocks
+            const diffBlocks = [];
+            visualRows.forEach((row, i) => {
+                if (row.type !== 'common' && (i === 0 || visualRows[i - 1].type !== row.type)) {
+                    diffBlocks.push(i);
+                }
+            });
+
+            if (diffBlocks.length === 0) return;
+
+            if (dir === 1) {
+                currentDiffIdx = (currentDiffIdx + 1) % diffBlocks.length;
+            } else {
+                currentDiffIdx = (currentDiffIdx - 1 + diffBlocks.length) % diffBlocks.length;
+            }
+
+            const targetLineIdx = diffBlocks[currentDiffIdx];
+            // Scroll to the line. Each row is 5 divs. Target the center one.
+            const targetEl = gridDisplay.children[targetLineIdx * 5 + 2];
+            if (targetEl) {
+                targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                // Briefly highlight?
+            }
+        }
+
+        function renderVisualRows(rows) {
+            const fragment = document.createDocumentFragment();
+
+            rows.forEach((row, index) => {
+                const prevRow = rows[index - 1];
+
+                const lDiv = document.createElement('div');
+                lDiv.className = `line ${getRowClass(row, 'left')}`;
+                lDiv.textContent = row.left === null ? '' : row.left;
+                if (row.left === null) lDiv.classList.add('empty');
+
+                const rDiv = document.createElement('div');
+                rDiv.className = `line ${getRowClass(row, 'right')}`;
+                rDiv.textContent = row.right === null ? '' : row.right;
+                if (row.right === null) rDiv.classList.add('empty');
+
+                const cDiv = document.createElement('div');
+                cDiv.className = `line ${getRowClass(row, 'center')}`;
+                cDiv.textContent = row.center;
+                if (!row.center && row.type !== 'common') cDiv.classList.add('empty');
+
+                // Left Gutter
+                const lgDiv = document.createElement('div');
+                lgDiv.className = 'gutter';
+                if (row.type !== 'common' && row.left !== null && (!prevRow || prevRow.type !== row.type || prevRow.left === null)) {
+                    let length = 1;
+                    for (let k = index + 1; k < rows.length && rows[k].type === row.type && rows[k].left !== null; k++) length++;
+
+                    const container = document.createElement('div');
+                    container.className = 'action-marker';
+                    container.style.height = `${length * 24}px`;
+                    container.style.top = '0';
+                    container.style.display = 'flex';
+                    container.style.gap = '2px';
+                    container.style.padding = '0 2px';
+
+                    const addBtn = document.createElement('span');
+                    addBtn.className = 'action-btn';
+                    addBtn.innerHTML = '>>';
+                    addBtn.title = 'Add Left';
+                    addBtn.onclick = () => applyAction(index, length, 'add-left');
+
+                    const remBtn = document.createElement('span');
+                    remBtn.className = 'action-btn';
+                    remBtn.innerHTML = 'X';
+                    remBtn.title = 'Remove Left';
+                    remBtn.onclick = () => applyAction(index, length, 'remove-left');
+
+                    container.appendChild(addBtn);
+                    container.appendChild(remBtn);
+                    lgDiv.appendChild(container);
+                }
+
+                // Right Gutter
+                const rgDiv = document.createElement('div');
+                rgDiv.className = 'gutter';
+                if (row.type !== 'common' && row.right !== null && (!prevRow || prevRow.type !== row.type || prevRow.right === null)) {
+                    let length = 1;
+                    for (let k = index + 1; k < rows.length && rows[k].type === row.type && rows[k].right !== null; k++) length++;
+
+                    const container = document.createElement('div');
+                    container.className = 'action-marker';
+                    container.style.height = `${length * 24}px`;
+                    container.style.display = 'flex';
+                    container.style.gap = '2px';
+                    container.style.padding = '0 2px';
+
+                    const remBtn = document.createElement('span');
+                    remBtn.className = 'action-btn';
+                    remBtn.innerHTML = 'X';
+                    remBtn.title = 'Remove Right';
+                    remBtn.onclick = () => applyAction(index, length, 'remove-right');
+
+                    const addBtn = document.createElement('span');
+                    addBtn.className = 'action-btn';
+                    addBtn.innerHTML = '<<';
+                    addBtn.title = 'Add Right';
+                    addBtn.onclick = () => applyAction(index, length, 'add-right');
+
+                    container.appendChild(remBtn);
+                    container.appendChild(addBtn);
+                    rgDiv.appendChild(container);
+                }
+
+                fragment.appendChild(lDiv);
+                fragment.appendChild(lgDiv);
+                fragment.appendChild(cDiv);
+                fragment.appendChild(rgDiv);
+                fragment.appendChild(rDiv);
+            });
+
+            gridDisplay.innerHTML = '';
+            gridDisplay.appendChild(fragment);
+        }
+
+        function getRowClass(row, col) {
+            if (row.type === 'common') return '';
+            let cls = '';
+            if (row.ignored) cls = 'diff-ignored';
+            else if (row.type === 'left-only') cls = (col === 'left' || col === 'center' ? 'diff-mod' : 'empty');
+            else if (row.type === 'right-add') cls = (col === 'right' || col === 'center' ? 'diff-add' : 'empty');
+            return cls;
+        }
+
+        function applyAction(startIndex, length, action) {
+            pushHistory();
+            for (let i = startIndex; i < startIndex + length; i++) {
+                if (action === 'add-left') {
+                    visualRows[i].center = visualRows[i].left;
+                    visualRows[i].ignored = false;
+                }
+                else if (action === 'add-right') {
+                    visualRows[i].center = visualRows[i].right;
+                    visualRows[i].ignored = false;
+                }
+                else if (action.startsWith('remove')) {
+                    visualRows[i].center = '';
+                    visualRows[i].ignored = true;
+                }
+            }
+            renderVisualRows(visualRows);
+        }
+
+        function copyResult() {
+            const lines = [];
+            for (let i = 2; i < gridDisplay.children.length; i += 5) {
+                const text = gridDisplay.children[i].textContent;
+                if (text) lines.push(text);
+            }
+            navigator.clipboard.writeText(lines.join('\n'));
+
+            const btn = document.querySelector('.toolbar .btn:last-child');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="ph ph-check"></i> Copied!';
+            setTimeout(() => btn.innerHTML = originalText, 2000);
+        }
+
+        if (!leftInput.value && !rightInput.value) {
+            inputDrawer.classList.remove('hidden');
+        }
+    </script>
+</body>
+
+</html>
